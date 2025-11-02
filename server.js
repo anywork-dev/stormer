@@ -50,7 +50,7 @@ async function callGeminiAPI(apiKey, systemPrompt, userMessage, history = [], en
     if (enableGrounding) {
         requestBody.tools = [
             {
-                googleSearch: {}
+                google_search: {}
             }
         ];
     }
