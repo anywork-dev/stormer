@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hacker News AI Explorer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto max-w-4xl p-4 h-screen flex flex-col">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-6 rounded-t-lg shadow-lg">
+            <h1 class="text-3xl font-bold">🔍 Hacker News AI Explorer</h1>
+            <p class="text-orange-100 mt-2">Ask questions about Hacker News stories and get AI-powered insights</p>
+        </div>
+
+        <!-- Chat Messages Area -->
+        <div id="chatMessages" class="flex-1 bg-white p-6 overflow-y-auto space-y-4 shadow-lg">
+            <!-- Welcome message -->
+            <div class="flex items-start space-x-3">
+                <div class="flex-shrink-0 w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold">
+                    AI
+                </div>
+                <div class="bg-gray-100 rounded-lg p-4 max-w-3xl">
+                    <p class="text-gray-800">
+                        Welcome! I can help you explore Hacker News. Try asking questions like:
+                    </p>
+                    <ul class="mt-2 text-gray-700 text-sm list-disc list-inside space-y-1">
+                        <li>"What are the top stories right now?"</li>
+                        <li>"Find stories about AI"</li>
+                        <li>"Show me the latest tech news"</li>
+                        <li>"What's trending in programming?"</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Form -->
+        <div class="bg-white p-4 rounded-b-lg shadow-lg">
+            <form id="chatForm" class="flex space-x-3">
+                <input 
+                    type="text" 
+                    id="userInput" 
+                    placeholder="Ask about Hacker News stories..." 
+                    class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    required
+                />
+                <button 
+                    type="submit" 
+                    id="submitBtn"
+                    class="px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 transition-colors font-medium disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                    Send
+                </button>
+            </form>
+            <div class="mt-2 text-xs text-gray-500 text-center">
+                Note: You need to provide your Gemini API key to use this app
+            </div>
+        </div>
+
+        <!-- API Key Modal -->
+        <div id="apiKeyModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">🔑 API Key Required</h2>
+                <p class="text-gray-600 mb-4">
+                    To use this app, you need a Gemini API key. 
+                    <a href="https://makersuite.google.com/app/apikey" target="_blank" class="text-orange-500 hover:text-orange-600 underline">
+                        Get one here
+                    </a>
+                </p>
+                <input 
+                    type="text" 
+                    id="apiKeyInput" 
+                    placeholder="Enter your Gemini API key" 
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 mb-2"
+                />
+                <div id="apiKeyError" class="text-red-600 text-sm mb-2 hidden">Please enter a valid API key</div>
+                <button 
+                    id="saveApiKeyBtn"
+                    class="w-full px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 transition-colors font-medium"
+                >
+                    Save and Start
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const GEMINI_API_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+        const HN_API_BASE = 'https://hacker-news.firebaseio.com/v0';
+        
+        // State
+        let apiKey = localStorage.getItem('gemini_api_key') || '';
+        
+        // DOM Elements
+        const chatMessages = document.getElementById('chatMessages');
+        const chatForm = document.getElementById('chatForm');
+        const userInput = document.getElementById('userInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const apiKeyModal = document.getElementById('apiKeyModal');
+        const apiKeyInput = document.getElementById('apiKeyInput');
+        const saveApiKeyBtn = document.getElementById('saveApiKeyBtn');
+        const apiKeyError = document.getElementById('apiKeyError');
+
+        // Initialize
+        if (apiKey) {
+            apiKeyModal.style.display = 'none';
+        }
+
+        // API Key handling
+        saveApiKeyBtn.addEventListener('click', () => {
+            const key = apiKeyInput.value.trim();
+            if (key) {
+                apiKey = key;
+                localStorage.setItem('gemini_api_key', key);
+                apiKeyModal.style.display = 'none';
+                apiKeyError.classList.add('hidden');
+            } else {
+                apiKeyError.classList.remove('hidden');
+            }
+        });
+
+        // Chat form submission
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!apiKey) {
+                apiKeyModal.style.display = 'flex';
+                return;
+            }
+
+            const query = userInput.value.trim();
+            if (!query) return;
+
+            // Disable input while processing
+            userInput.disabled = true;
+            submitBtn.disabled = true;
+
+            // Add user message
+            addMessage(query, 'user');
+            userInput.value = '';
+
+            // Add loading indicator
+            const loadingId = addLoadingMessage();
+
+            try {
+                // Fetch Hacker News data
+                const hnData = await fetchHackerNewsData(query);
+                
+                // Send to Gemini API
+                const response = await analyzeWithGemini(query, hnData);
+                
+                // Remove loading and show response
+                removeMessage(loadingId);
+                addMessage(response, 'ai');
+            } catch (error) {
+                removeMessage(loadingId);
+                addMessage(`❌ Error: ${error.message}`, 'error');
+            } finally {
+                userInput.disabled = false;
+                submitBtn.disabled = false;
+                userInput.focus();
+            }
+        });
+
+        // Add message to chat
+        function addMessage(content, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'flex items-start space-x-3';
+            messageDiv.dataset.messageId = Date.now();
+
+            if (type === 'user') {
+                messageDiv.classList.add('flex-row-reverse', 'space-x-reverse');
+                messageDiv.innerHTML = `
+                    <div class="flex-shrink-0 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold">
+                        U
+                    </div>
+                    <div class="bg-blue-500 text-white rounded-lg p-4 max-w-3xl">
+                        ${escapeHtml(content)}
+                    </div>
+                `;
+            } else if (type === 'error') {
+                messageDiv.innerHTML = `
+                    <div class="flex-shrink-0 w-8 h-8 bg-red-500 rounded-full flex items-center justify-center text-white font-bold">
+                        !
+                    </div>
+                    <div class="bg-red-100 border border-red-400 text-red-700 rounded-lg p-4 max-w-3xl">
+                        ${escapeHtml(content)}
+                    </div>
+                `;
+            } else {
+                messageDiv.innerHTML = `
+                    <div class="flex-shrink-0 w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold">
+                        AI
+                    </div>
+                    <div class="bg-gray-100 rounded-lg p-4 max-w-3xl">
+                        ${formatResponse(content)}
+                    </div>
+                `;
+            }
+
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return messageDiv.dataset.messageId;
+        }
+
+        // Add loading indicator
+        function addLoadingMessage() {
+            const loadingDiv = document.createElement('div');
+            const loadingId = 'loading-' + Date.now();
+            loadingDiv.dataset.messageId = loadingId;
+            loadingDiv.className = 'flex items-start space-x-3';
+            loadingDiv.innerHTML = `
+                <div class="flex-shrink-0 w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center text-white font-bold">
+                    AI
+                </div>
+                <div class="bg-gray-100 rounded-lg p-4">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span class="text-gray-600">Analyzing Hacker News data...</span>
+                    </div>
+                </div>
+            `;
+            chatMessages.appendChild(loadingDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return loadingId;
+        }
+
+        // Remove message by ID
+        function removeMessage(messageId) {
+            const message = chatMessages.querySelector(`[data-message-id="${messageId}"]`);
+            if (message) {
+                message.remove();
+            }
+        }
+
+        // Fetch Hacker News data
+        async function fetchHackerNewsData(query) {
+            try {
+                // Fetch top stories
+                const topStoriesRes = await fetch(`${HN_API_BASE}/topstories.json`);
+                if (!topStoriesRes.ok) throw new Error('Failed to fetch top stories');
+                
+                const topStoryIds = await topStoriesRes.json();
+                
+                // Fetch first 30 stories
+                const storyIds = topStoryIds.slice(0, 30);
+                const storyPromises = storyIds.map(id => 
+                    fetch(`${HN_API_BASE}/item/${id}.json`)
+                        .then(res => {
+                            if (!res.ok) return null;
+                            return res.json();
+                        })
+                        .catch(() => null)
+                );
+                
+                const stories = await Promise.all(storyPromises);
+                
+                // Filter out null/invalid stories and format
+                const validStories = stories
+                    .filter(story => story && story.title)
+                    .map(story => ({
+                        title: story.title,
+                        url: story.url || `https://news.ycombinator.com/item?id=${story.id}`,
+                        score: story.score || 0,
+                        author: story.by || 'unknown',
+                        time: new Date(story.time * 1000).toISOString(),
+                        comments: story.descendants || 0
+                    }));
+
+                return validStories;
+            } catch (error) {
+                throw new Error(`Failed to fetch Hacker News data: ${error.message}`);
+            }
+        }
+
+        // Analyze with Gemini API
+        async function analyzeWithGemini(query, hnData) {
+            try {
+                const prompt = `User Query: ${query}
+
+Hacker News Data (top 30 stories):
+${JSON.stringify(hnData, null, 2)}
+
+Please analyze the Hacker News data above and provide a helpful response to the user's query. 
+If the query asks for specific stories, filter and present the most relevant ones.
+Format your response in a clear, conversational manner.`;
+
+                const response = await fetch(`${GEMINI_API_ENDPOINT}?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: prompt
+                            }]
+                        }]
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error?.message || `API request failed with status ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+                    throw new Error('Invalid response from Gemini API');
+                }
+
+                return data.candidates[0].content.parts[0].text;
+            } catch (error) {
+                throw new Error(`Gemini API error: ${error.message}`);
+            }
+        }
+
+        // Format response with basic markdown-like rendering
+        function formatResponse(text) {
+            // Escape HTML first
+            text = escapeHtml(text);
+            
+            // Convert **bold** to <strong> first
+            text = text.replace(/\*\*([^\*]+)\*\*/g, '<strong>$1</strong>');
+            
+            // Convert remaining single * to <em> (avoiding already processed bold markers)
+            // This approach works in all browsers including Safari
+            text = text.replace(/\*([^\*<>]+)\*/g, (match, content) => {
+                // Check if this is part of an incomplete ** pattern
+                if (content.includes('<strong>') || content.includes('</strong>')) {
+                    return match;
+                }
+                return '<em>' + content + '</em>';
+            });
+            
+            // Convert newlines to <br>
+            text = text.replace(/\n/g, '<br>');
+            
+            // Convert URLs to links
+            text = text.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" class="text-orange-500 hover:text-orange-600 underline">$1</a>');
+            
+            return text;
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
